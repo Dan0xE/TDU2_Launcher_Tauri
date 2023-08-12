@@ -1,0 +1,4 @@
+EXPORTS
+    InjectDLL @1
+    is_process_running @2
+    run_game_with_mutex @3
