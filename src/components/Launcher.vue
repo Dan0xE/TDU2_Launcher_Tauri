@@ -33,15 +33,15 @@ async function inject() {
   }) : err_message.value = "Game is not running, start the game before injecting"
 }
 
-async function launch_game (path: string) {
-  await game_path ? invoke("run_game", { path }).then((res) => err_message.value = res as string) : console.log("game path not set");
+async function launch_game () {
+  await game_path.value ? invoke("run_game", { path: game_path.value }).then((res) => err_message.value = res as string) : console.log("game path not set");
 }
 </script>
 
 <template>
     <button v-on:click="select_game_path()">Select Game Path</button>
     <button v-on:click="inject()">Inject DLL</button>
-    <button v-if="!game_is_running" v-on:click="launch_game(game_path)">Launch Game</button>
+    <button v-if="!game_is_running" v-on:click="launch_game()">Launch Game</button>
 
   <p>{{ game_is_running ? "Game is running (close the game before launching)" : "Game is not running" }}</p>
   <p>{{ err_message }}</p>
