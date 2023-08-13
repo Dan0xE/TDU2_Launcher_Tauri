@@ -34,7 +34,9 @@ async function inject() {
 }
 
 async function launch_game () {
-  !game_is_running ? game_path.value ? invoke("run_game", { path: game_path.value }).then((res) => err_message.value = res as string) : err_message.value = "game path not set" : err_message.value = "game is already running!";
+  game_path.value ?
+  invoke("run_game", { path: game_path.value }).then((res) => err_message.value = res as string)
+  : err_message.value = "game path not set"
 }
 </script>
 
