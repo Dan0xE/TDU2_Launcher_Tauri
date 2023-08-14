@@ -8,11 +8,28 @@
 #include <io.h>
 #include <stdlib.h>
 
-#define PROCESS_NAME "TestDrive2.exe"
+#define TARGET_NAME "TestDrive2.exe"
+#define MUTEX_NAME "957e4cc3"
+#define MAX_THREADS 1024
 #define BUFFER_SIZE 1024
 #define MAX_PATH 260
-#define EXE_NAME "TestDrive2.exe"
-#define MUTEX_NAME "957e4cc3"
+
+typedef enum
+{
+	RUNNING,
+	SUSPENDED
+} THREAD_STATE;
+
+typedef struct
+{
+	DWORD pid;
+	HANDLE hThread[MAX_THREADS];
+	THREAD_STATE state[MAX_THREADS];
+	THREAD_STATE overallState;
+	int threadCount;
+} GameInfo;
+
+GameInfo tdu2;
 
 bool DoesFileExist(const char *name)
 {
@@ -34,7 +51,7 @@ DWORD GetProcessIdFunc()
 	{
 		do
 		{
-			if (strcmp(pe32.szExeFile, PROCESS_NAME) == 0)
+			if (strcmp(pe32.szExeFile, TARGET_NAME) == 0)
 			{
 				CloseHandle(hSnap);
 				return pe32.th32ProcessID;
@@ -137,11 +154,6 @@ __declspec(dllexport) bool InjectDLL(const char *DllPath)
 	return LoadLibraryInject(GetProcessIdFunc(), DllPath);
 }
 
-#define BUFFER_SIZE 1024
-#define MAX_PATH 260
-#define EXE_NAME "TestDrive2.exe"
-#define MUTEX_NAME "957e4cc3"
-
 void show_message(const char *title, const char *message)
 {
 	MessageBox(NULL, message, title, MB_ICONEXCLAMATION | MB_OK);
@@ -170,7 +182,7 @@ __declspec(dllexport) bool is_process_running()
 	{
 		do
 		{
-			if (_stricmp(entry.szExeFile, EXE_NAME) == 0)
+			if (_stricmp(entry.szExeFile, TARGET_NAME) == 0)
 			{
 				process_found = TRUE;
 				break;
@@ -225,7 +237,7 @@ void run_game(const char *path)
 
 __declspec(dllexport) void run_game_with_mutex(const char *path)
 {
-	if (is_process_running(EXE_NAME))
+	if (is_process_running(TARGET_NAME))
 	{
 		fprintf(stderr, "Game is already running!\n");
 		return;
@@ -252,4 +264,122 @@ __declspec(dllexport) void run_game_with_mutex(const char *path)
 		exit(EXIT_FAILURE);
 	}
 	exit(0);
+}
+
+BOOL InitializeGameInfo(const char *processName)
+{
+	tdu2.threadCount = 0;
+	HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	PROCESSENTRY32 pe32;
+	pe32.dwSize = sizeof(PROCESSENTRY32);
+
+	if (hSnapshot == INVALID_HANDLE_VALUE)
+		return FALSE;
+
+	if (!Process32First(hSnapshot, &pe32))
+	{
+		CloseHandle(hSnapshot);
+		return FALSE;
+	}
+
+	do
+	{
+		if (_strcmpi(pe32.szExeFile, processName) == 0)
+		{
+			tdu2.pid = pe32.th32ProcessID;
+			CloseHandle(hSnapshot);
+
+			HANDLE hThreadSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+			if (hThreadSnapshot == INVALID_HANDLE_VALUE)
+				return FALSE;
+
+			THREADENTRY32 te32;
+			te32.dwSize = sizeof(THREADENTRY32);
+
+			if (!Thread32First(hThreadSnapshot, &te32))
+			{
+				CloseHandle(hThreadSnapshot);
+				return FALSE;
+			}
+
+			do
+			{
+				if (te32.th32OwnerProcessID == tdu2.pid)
+				{
+					tdu2.hThread[tdu2.threadCount] = OpenThread(THREAD_SUSPEND_RESUME, FALSE, te32.th32ThreadID);
+					tdu2.state[tdu2.threadCount] = RUNNING;
+					tdu2.threadCount++;
+
+					if (tdu2.threadCount >= MAX_THREADS)
+						break;
+
+					CloseHandle(hThreadSnapshot);
+					return TRUE;
+				}
+			} while (Thread32Next(hThreadSnapshot, &te32));
+			CloseHandle(hThreadSnapshot);
+			return FALSE;
+		}
+	} while (Process32Next(hSnapshot, &pe32));
+	CloseHandle(hSnapshot);
+	return FALSE;
+}
+
+__declspec(dllexport) bool handle_game_thread()
+{
+	if (!InitializeGameInfo(TARGET_NAME))
+	{
+		return false;
+	}
+
+	if (tdu2.overallState == RUNNING)
+	{
+		bool success = true;
+
+		for (int i = 0; i < tdu2.threadCount; i++)
+		{
+			DWORD result = SuspendThread(tdu2.hThread[i]);
+			if (result != -1)
+			{
+				tdu2.state[i] = SUSPENDED;
+			}
+			else
+			{
+				success = false;
+			}
+			CloseHandle(tdu2.hThread[i]);
+		}
+
+		if (success)
+		{
+			tdu2.overallState = SUSPENDED;
+		}
+		return success;
+	}
+	else if (tdu2.overallState == SUSPENDED)
+	{
+		bool success = true;
+
+		for (int i = 0; i < tdu2.threadCount; i++)
+		{
+			DWORD result = ResumeThread(tdu2.hThread[i]);
+			if (result != -1)
+			{
+				tdu2.state[i] = RUNNING;
+			}
+			else
+			{
+				success = false;
+			}
+			CloseHandle(tdu2.hThread[i]);
+		}
+
+		if (success)
+		{
+			tdu2.overallState = RUNNING;
+		}
+		return success;
+	}
+
+	return false;
 }
